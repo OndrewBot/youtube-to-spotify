@@ -14,9 +14,9 @@ Webscraping the Youtube video for artists/songs:
 Status: Learning how to work with Selenium module for web automation and accessing content behind buttons.
 
 1. Artists/Songs can be stored in 4 different locations:
-  A. Tracklist in the description
-  B. Artist and Song element in the description (information not available through YouTube API yet)
-  C. Video chapters descriptions
+  A. Tracklist in the description,
+  B. Artist and Song element in the description (information not available through YouTube API yet),
+  C. Video chapters descriptions,
   D. Tracklist in the comments
 2. Selenium module finds and clicks the 'Show More' button and, in the case of A.2 the 'next' button (>).
 3. BeautifulSoup and Request Module allow distinct tags and class_ info to be searched for and parsed
