@@ -2,7 +2,6 @@ from dotenv import load_dotenv
 import os
 import base64
 from requests import post
-import json
 
 
 load_dotenv()
@@ -28,7 +27,3 @@ def get_token():
     # token = json_result["access_token"]
     token = result.json()["access_token"]
     return token
-
-
-token = get_token()
-print(token)
