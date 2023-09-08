@@ -5,7 +5,8 @@
 # Step 5: Add song into new Spotify playlist
 
 from bs4 import BeautifulSoup
-import requests
+import json
+from requests import get, post
 from selenium import webdriver
 from selenium.webdriver import ActionChains
 from selenium.webdriver.common.by import By
@@ -13,20 +14,21 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
-from access_token import get_token
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+from flask import Flask, request, url_for, session, redirect
 
-class NoSongsFound(Exception):
-    """
-    Creates an exception if no songs are found.
-    """
-    pass
+from access_token import get_token, get_auth_header, user_id, client_id, client_secret, app_secret
 
-class CreatePlaylist:
 
-    def __init__(self):
+class CreatePlaylist():
+
+    def __init__(self, youtube_url):
+        self.youtube_url = youtube_url
         self._tracklist = []
         self._title = ''
         self._length = 0
+        self.user_id = user_id
         pass
 
     def get_tracklist(self):
@@ -38,12 +40,8 @@ class CreatePlaylist:
     def get_title(self):
         return self._title
 
-    # Step 1: Log into YouTube 
-    def get_youtube_client(self):
-        pass
-
     # Step 2: Grab our liked videos
-    def get_songs_youtube(self, url, PATH="C:\Program Files (x86)\chromedriver-win32\chromedriver.exe", option1='--headless=new'):
+    def get_songs_youtube(self, PATH="C:\Program Files (x86)\chromedriver-win32\chromedriver.exe", option1='--headless=new'):
         """
         Loads the webpage. Finds the number of songs in the video. Looks if a tracklist is in the description
             or in the top 5 comments. Also looks to see if the description has a 'music' section with song/artist
@@ -63,7 +61,7 @@ class CreatePlaylist:
         # load page
         driver = webdriver.Chrome(executable_path=PATH, options=options)
         try:
-            driver.get(url)
+            driver.get(self.youtube_url)
             driver.maximize_window()
         except Exception as e:
             print("URL failed to load.", e)
@@ -89,7 +87,7 @@ class CreatePlaylist:
         # if get_num_songs_music_desc() >= get_num_songs_tracklist_desc():
         #     get_songs_music_desc()
 
-        def find_title(soup = soup, tag='h1', class_name='style-scope ytd-watch-metadata'):
+        def find_title(soup=soup, tag='h1', class_name='style-scope ytd-watch-metadata'):
             # capture title of video - to be used as playlist title
             try:
                 playlist_title = soup.find(tag, {'class': class_name}).text
@@ -170,17 +168,31 @@ class CreatePlaylist:
                                 text_transfer_list.append(text.strip())
                     if (index_count % 2 != 0) and (':' not in text):
                         break
-                if '0:00' in text:
+                if '0:' in text:
                     index_count += 1
             
-            cant_contain_list = ('/', '\\', '|', '<', '>', '*', '?', '"', ":", " - ", "-", "  ")
+            cant_contain_list = ('/', '\\', '\\r', '|', '<', '>', '*', '?', '"', ":", "by", " – ", "–", " - ", "-", "  ")
             text_transfer_list = "#".join(text_transfer_list)
             
             for nono in cant_contain_list:
                 text_transfer_list = text_transfer_list.replace(nono, ' ')
+            text_transfer_list = text_transfer_list.replace('’', '\'')
             text_transfer_list = text_transfer_list.split('#')
-            for text in text_transfer_list:
-                text.strip()
+
+            for val in range(len(text_transfer_list)):
+                text = text_transfer_list[val]
+                text = text.strip()
+                if '[' in text:
+                    strt = text.index('[')
+                    if strt:
+                        stp = text.index(']')
+                        text_copy = text
+                        if stp >= len(text) - 1:
+                            text = text[:strt]
+                            text_transfer_list[val] = text
+                        else:
+                            text = text[:strt] + text_copy[stp + 1:]
+                            text_transfer_list[val] = text
                         
             return text_transfer_list
 
@@ -231,7 +243,7 @@ class CreatePlaylist:
             custom_desc_tracklist = [artist_holder[i] + ' ' + song_holder[i] for i in range(len(song_holder))]
 
             
-            return self._tracklist
+            return custom_desc_tracklist
         
         def get_songs_comment(soup=soup, tag='yt-formatted-string', id_name='content-text'):
             """
@@ -249,19 +261,46 @@ class CreatePlaylist:
             
             for val in range(10):
                 comment = find_songs[val]
-                if '0:00' in comment.text and 'Sign in' not in comment.text:
+                if '0:' in comment.text and 'Sign in' not in comment.text:
                     all_tracks = comment.span
                     start_flag = 0
+                    text_holder.append(all_tracks.text)
                     for track in all_tracks.next_siblings:
                         if start_flag == 1:
                             text_holder.append(track.text)
                             start_flag = 0
                         elif start_flag == 0 and ':' in track.text:
                             start_flag = 1
+                        
                     break
 
             for text in text_holder:
                 text.strip()
+
+            cant_contain_list = ('/', '\\', '\\r', '|', '<', '>', '*', '?', '"', ":", "by", " – ", "–", " - ", "-", "  ")
+            text_holder = "#".join(text_holder)
+            
+            for nono in cant_contain_list:
+                text_holder = text_holder.replace(nono, ' ')
+            text_holder = text_holder.replace('’', '\'')
+            text_holder = text_holder.split('#')
+
+            # [] brackets are often used to denote an album and will hurt search results
+            # remove the [] and anyting between
+            for val in range(len(text_holder)):
+                text = text_holder[val]
+                text = text.strip()
+                if '[' in text:
+                    strt = text.index('[')
+                    if strt:
+                        stp = text.index(']')
+                        text_copy = text
+                        if stp >= len(text) - 1:
+                            text = text[:strt]
+                            text_holder[val] = text
+                        else:
+                            text = text[:strt] + text_copy[stp + 1:]
+                            text_holder[val] = text
                         
             return text_holder
 
@@ -289,29 +328,19 @@ class CreatePlaylist:
             driver.quit()
 
         #   save title and tracklist in txt file
-        playlist_title = str(playlist_title) + '.txt'
-        with open(playlist_title, 'w', encoding='utf-8') as outfile:
-            for track in self._tracklist:
-                outfile.write(f'{track}\n')
-
-    # Step 4: Create a custom playlist
-    def create_playlist(self):
-        token = get_token()
-        pass
-
-    # Step 4: Search for the song
-    def get_spotify_url(self):
-        pass
-
-    # Step 5: Add song into new Spotify playlist
-    def add_song_to_playlist(self):
-        pass
+        # playlist_title = str(playlist_title) + '.txt'
+        # with open(playlist_title, 'w', encoding='utf-8') as outfile:
+        #     for track in self._tracklist:
+        #         outfile.write(f'{track}\n')
+        return 
 
 #-------------------------------------------------------------------------------------------
 
-if __name__ == "__main__":
-    playlist = CreatePlaylist()
-    # utube_url = input("Enter YouTube URL:\n")
-    playlist.get_songs_youtube('https://www.youtube.com/watch?v=3CeRaSBesiw')
-    playlist.get_songs_youtube('https://www.youtube.com/watch?v=fsakyvtqETA')
-    playlist.get_songs_youtube('https://www.youtube.com/watch?v=Zz6oob45faU')
+# if __name__ == "__main__":
+    # playlist = CreatePlaylist('https://www.youtube.com/watch?v=Zz6oob45faU')
+    # # utube_url = input("Enter YouTube URL:\n")
+    # # playlist.get_songs_youtube('https://www.youtube.com/watch?v=3CeRaSBesiw')
+    # # playlist.get_songs_youtube('https://www.youtube.com/watch?v=fsakyvtqETA')
+    # playlist.get_songs_youtube()
+    # playlist.create_playlist(token, playlist.get_title(), yourl)
+    # playlist.add_songs_to_playlist(token, playlist.get_tracklist())
